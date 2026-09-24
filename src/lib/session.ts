@@ -1,13 +1,17 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { cookies } from "next/headers";
-import { getBidder } from "./store";
 import type { Bidder } from "./types";
 
 /**
- * Bidders are identified by a "paddle" (as in a saleroom) kept in a signed,
- * httpOnly cookie. This is a stand-in for real authentication: replace it with
- * an auth provider (e-mail magic links, OAuth, …) before going live.
+ * Bidders are identified by a "paddle" (as in a saleroom). The paddle number,
+ * name and e-mail address travel in a signed, httpOnly cookie, so any server
+ * instance can recognise the bidder without a database lookup.
+ *
+ * This is a stand-in for real authentication: replace it with an auth provider
+ * (e-mail magic links, OAuth, …) before going live.
  */
+
+export type SessionBidder = Pick<Bidder, "paddle" | "name" | "email"> & { since: number };
 
 const COOKIE = "malisa_paddle";
 const MAX_AGE = 60 * 60 * 24 * 90;
@@ -21,33 +25,44 @@ function secret(): string {
   return "malisa-dev-secret-change-me";
 }
 
-function sign(paddle: number): string {
-  const mac = createHmac("sha256", secret()).update(String(paddle)).digest("base64url");
-  return `${paddle}.${mac}`;
+function mac(payload: string): string {
+  return createHmac("sha256", secret()).update(payload).digest("base64url");
 }
 
-function verify(token: string | undefined): number | null {
+export function encodeSession(bidder: SessionBidder): string {
+  const payload = Buffer.from(
+    JSON.stringify({ p: bidder.paddle, n: bidder.name, e: bidder.email, s: bidder.since }),
+  ).toString("base64url");
+  return `${payload}.${mac(payload)}`;
+}
+
+export function decodeSession(token: string | undefined): SessionBidder | null {
   if (!token) return null;
-  const [raw, mac] = token.split(".");
-  const paddle = Number(raw);
-  if (!Number.isInteger(paddle) || !mac) return null;
-  const expected = Buffer.from(sign(paddle).split(".")[1]);
-  const given = Buffer.from(mac);
+  const [payload, signature] = token.split(".");
+  if (!payload || !signature) return null;
+  const expected = Buffer.from(mac(payload));
+  const given = Buffer.from(signature);
   if (expected.length !== given.length || !timingSafeEqual(expected, given)) return null;
-  return paddle;
+  try {
+    const { p, n, e, s } = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+    if (!Number.isInteger(p) || typeof n !== "string" || typeof e !== "string") return null;
+    return { paddle: p, name: n, email: e, since: Number.isInteger(s) ? s : new Date().getFullYear() };
+  } catch {
+    return null;
+  }
+}
+
+export async function currentBidder(): Promise<SessionBidder | null> {
+  return decodeSession((await cookies()).get(COOKIE)?.value);
 }
 
 export async function currentPaddle(): Promise<number | null> {
-  return verify((await cookies()).get(COOKIE)?.value);
+  return (await currentBidder())?.paddle ?? null;
 }
 
-export async function currentBidder(): Promise<Bidder | null> {
-  const paddle = await currentPaddle();
-  return paddle == null ? null : getBidder(paddle);
-}
-
-export async function startSession(paddle: number): Promise<void> {
-  (await cookies()).set(COOKIE, sign(paddle), {
+export async function startSession(bidder: Bidder): Promise<void> {
+  const since = new Date(bidder.createdAt).getFullYear();
+  (await cookies()).set(COOKIE, encodeSession({ ...bidder, since }), {
     httpOnly: true,
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",

@@ -1,19 +1,21 @@
-import { readFile } from "node:fs/promises";
-import path from "node:path";
-import { DATA_DIR } from "@/lib/store";
-
-const TYPES: Record<string, string> = { jpg: "image/jpeg", png: "image/png", webp: "image/webp" };
+import { backend } from "@/lib/store";
 
 export async function GET(_req: Request, ctx: RouteContext<"/api/uploads/[file]">) {
   const { file } = await ctx.params;
-  const match = /^[0-9a-f-]{36}\.(jpg|png|webp)$/.exec(file);
-  if (!match) return new Response("Not found", { status: 404 });
+  if (!/^[0-9a-f-]{36}\.(jpg|png|webp)$/.test(file)) return new Response("Not found", { status: 404 });
   try {
-    const bytes = await readFile(path.join(DATA_DIR, "uploads", file));
-    return new Response(bytes, {
-      headers: { "Content-Type": TYPES[match[1]], "Cache-Control": "public, max-age=31536000, immutable" },
+    const upload = await backend.readUpload(file);
+    if (!upload) return new Response("Not found", { status: 404 });
+    return new Response(upload.body as BodyInit, {
+      headers: {
+        "Content-Type": upload.contentType,
+        "X-Content-Type-Options": "nosniff",
+        // Upload names are random and never reused, so they can be cached for good, including by the CDN.
+        "Cache-Control": "public, max-age=31536000, s-maxage=31536000, immutable",
+      },
     });
-  } catch {
-    return new Response("Not found", { status: 404 });
+  } catch (error) {
+    console.error("[malisa] could not read upload", error);
+    return new Response("Unavailable", { status: 503 });
   }
 }

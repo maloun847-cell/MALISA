@@ -60,9 +60,10 @@ src/
     ui/                section frame, eyebrow label, two-tone heading
   lib/
     auction.ts         pure bidding rules (unit-tested)
-    store.ts           JSON-file data store with serialised writes
+    store.ts           the auction database: cached reads, conflict-checked writes
+    persistence.ts     where it lives: .data/ on disk, or a private Vercel Blob store
     seed.ts            demo catalogue
-    session.ts         signed "paddle" cookie
+    session.ts         signed "paddle" cookie carrying the bidder's identity
     queries.ts         page-level data queries
 ```
 
@@ -74,13 +75,25 @@ The tokens live in `src/app/globals.css` (Tailwind v4 `@theme`):
 - **Fonts:** Inter Tight (text), IBM Plex Mono (labels), Instrument Serif italic (the quieter half of headings).
 - **Motifs:** the page frame is drawn with hairline rules, with `+` registration marks where they cross. Lists use bracketed indices (`[1]`, `[a]`). Section labels end in a slash (`Auctions /`).
 
+## Deploying to Vercel
+
+Vercel runs the app on several servers at once, and each one has its own short-lived disk. So on Vercel the data and uploaded photos live in a **private Vercel Blob store** instead of `.data/`:
+
+1. Import the repository into Vercel. The framework is detected as Next.js.
+2. Under **Storage**, create a Blob store with **private** access and connect it to the project. This adds `BLOB_READ_WRITE_TOKEN`, and the app switches to Blob automatically.
+3. Add `MALISA_SECRET`, set to a long random string.
+
+Every change re-reads the stored document and writes it back only if nobody else wrote in between (an ETag check). If someone did, the change is retried on the newer version, so two simultaneous bids can't overwrite each other.
+
+Reads are cached for 4 seconds per server. The bid panel refreshes every 3–8 seconds and pauses while the tab is hidden. The Hobby plan includes 10,000 Blob reads and 2,000 writes a month. That is plenty for a preview, but not for real traffic.
+
 ## Before going live
 
 This is a working prototype. Several parts are deliberately simple and need replacing before real money changes hands:
 
 1. **Authentication.** A "paddle" is a signed cookie issued from a name and an e-mail address, with no verification. Anyone who types an existing e-mail address gets that paddle. Replace it with a real auth provider (magic links, OAuth), and set `MALISA_SECRET` in every environment.
-2. **Database.** `src/lib/store.ts` keeps everything in memory and writes it through to a JSON file. That only works on one long-running server. Replace it with Postgres or similar, and use row locking or a transaction around each bid. Serverless hosts such as Vercel have a read-only, per-instance filesystem.
-3. **Uploads.** Photos are stored in `.data/uploads`. Move them to object storage (S3, R2, Vercel Blob).
+2. **Database.** The whole auction is one JSON document (see [Deploying to Vercel](#deploying-to-vercel)). Writes are safe under concurrency, but every bid rewrites the whole document. Move to Postgres or similar before real volume, with a transaction around each bid. `createStore` in `src/lib/store.ts` is the seam to replace.
+3. **Uploads.** Photos go to `.data/uploads` locally and to the private Blob store on Vercel. Either way they are served through `/api/uploads/…`. Resize them on upload before real sellers use the site.
 4. **Real-time updates.** The bid panel polls. For heavy traffic, switch to Server-Sent Events or WebSockets.
 5. **Payments, shipping and e-mail notifications** (outbid alerts, won-lot invoices) are not built yet.
 6. **Content.** The contact address (`hello@malisa.example`), fees, policies and FAQ answers are placeholders. So is the whole demo catalogue: its lots, sellers and bidders are fictional.

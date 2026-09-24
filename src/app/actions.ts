@@ -1,20 +1,23 @@
 "use server";
 
 import { randomUUID } from "node:crypto";
-import { mkdir, writeFile } from "node:fs/promises";
-import path from "node:path";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { isCategory } from "@/lib/categories";
 import { imageSize } from "@/lib/image-size";
-import { currentBidder, currentPaddle, endSession, startSession } from "@/lib/session";
-import { createLot, DATA_DIR, placeBid, registerBidder } from "@/lib/store";
+import { currentBidder, endSession, startSession } from "@/lib/session";
+import { type LotSnapshot, snapshot } from "@/lib/snapshot";
+import { backend, createLot, placeBid, registerBidder } from "@/lib/store";
 
 export type FormState = {
   ok?: boolean;
   message?: string;
   errors?: Record<string, string>;
+  /** The lot as it stands after a successful bid. */
+  lot?: LotSnapshot;
 };
+
+const TRY_AGAIN = "We couldn't save that just now. Please try again.";
 
 const text = (form: FormData, key: string) => String(form.get(key) ?? "").trim();
 const whole = (form: FormData, key: string) => {
@@ -30,8 +33,14 @@ export async function registerAction(_prev: FormState, form: FormData): Promise<
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) errors.email = "Enter a valid e-mail address.";
   if (Object.keys(errors).length) return { errors };
 
-  const bidder = await registerBidder(name, email);
-  await startSession(bidder.paddle);
+  let bidder;
+  try {
+    bidder = await registerBidder(name, email);
+  } catch (error) {
+    console.error("[malisa] registration failed", error);
+    return { message: TRY_AGAIN };
+  }
+  await startSession(bidder);
   revalidatePath("/", "layout");
   return { ok: true, message: `Paddle ${bidder.paddle} is ready.` };
 }
@@ -43,16 +52,22 @@ export async function signOutAction(): Promise<void> {
 }
 
 export async function bidAction(_prev: FormState, form: FormData): Promise<FormState> {
-  const paddle = await currentPaddle();
-  if (paddle == null) return { message: "Register a paddle to bid." };
+  const bidder = await currentBidder();
+  if (!bidder) return { message: "Register a paddle to bid." };
   const lotId = text(form, "lotId");
   const amount = whole(form, "amount");
-  const result = await placeBid(lotId, paddle, amount);
+  let result;
+  try {
+    result = await placeBid(lotId, bidder, amount);
+  } catch (error) {
+    console.error("[malisa] bid failed", error);
+    return { message: TRY_AGAIN };
+  }
   if (!result.ok) return { message: result.reason };
   revalidatePath(`/auctions/${lotId}`);
   revalidatePath("/auctions");
   revalidatePath("/");
-  return { ok: true, message: "Your bid is in the lead." };
+  return { ok: true, message: "Your bid is in the lead.", lot: snapshot(result.lot) };
 }
 
 const MAX_UPLOAD = 5 * 1024 * 1024;
@@ -100,9 +115,12 @@ export async function createLotAction(_prev: FormState, form: FormData): Promise
       errors.image = "Use a JPEG, PNG or WebP photograph.";
     } else if (!Object.keys(errors).length) {
       const name = `${randomUUID()}.${size.type === "jpeg" ? "jpg" : size.type}`;
-      const dir = path.join(DATA_DIR, "uploads");
-      await mkdir(dir, { recursive: true });
-      await writeFile(path.join(dir, name), bytes);
+      try {
+        await backend.saveUpload(name, bytes, `image/${size.type}`);
+      } catch (error) {
+        console.error("[malisa] upload failed", error);
+        return { message: TRY_AGAIN };
+      }
       image = { src: `/api/uploads/${name}`, width: size.width, height: size.height };
     }
   }
@@ -120,28 +138,34 @@ export async function createLotAction(_prev: FormState, form: FormData): Promise
       .slice(0, 8);
 
   const now = Date.now();
-  const lot = await createLot({
-    title,
-    maker: maker || "Unattributed",
-    period: period || "Date unknown",
-    category,
-    description,
-    image,
-    startingBid,
-    reserve: Number.isNaN(reserveRaw) ? null : reserveRaw,
-    estimate: [low, high],
-    startsAt: new Date(now).toISOString(),
-    endsAt: new Date(now + days * 86_400_000).toISOString(),
-    seller: { name: bidder.name, location, since: new Date(bidder.createdAt).getFullYear() },
-    sellerPaddle: bidder.paddle,
-    specs: pairs("specs").map(([label, value]) => ({ label, value })),
-    condition: {
-      grade: 0,
-      summary: "Seller's description. A Malisa specialist has not inspected this lot yet.",
-      notes: pairs("notes").map(([label, detail], i) => ({ key: String.fromCharCode(97 + i), label, detail })),
-    },
-    provenance: [{ year: String(new Date(now).getFullYear()), event: `Listed by paddle ${bidder.paddle}` }],
-  });
+  let lot;
+  try {
+    lot = await createLot({
+      title,
+      maker: maker || "Unattributed",
+      period: period || "Date unknown",
+      category,
+      description,
+      image,
+      startingBid,
+      reserve: Number.isNaN(reserveRaw) ? null : reserveRaw,
+      estimate: [low, high],
+      startsAt: new Date(now).toISOString(),
+      endsAt: new Date(now + days * 86_400_000).toISOString(),
+      seller: { name: bidder.name, location, since: bidder.since },
+      sellerPaddle: bidder.paddle,
+      specs: pairs("specs").map(([label, value]) => ({ label, value })),
+      condition: {
+        grade: 0,
+        summary: "Seller's description. A Malisa specialist has not inspected this lot yet.",
+        notes: pairs("notes").map(([label, detail], i) => ({ key: String.fromCharCode(97 + i), label, detail })),
+      },
+      provenance: [{ year: String(new Date(now).getFullYear()), event: `Listed by paddle ${bidder.paddle}` }],
+    });
+  } catch (error) {
+    console.error("[malisa] listing failed", error);
+    return { message: TRY_AGAIN };
+  }
 
   revalidatePath("/auctions");
   revalidatePath("/");

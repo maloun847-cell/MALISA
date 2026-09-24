@@ -18,33 +18,51 @@ export function BidPanel({ initial, paddle, isSeller }: Props) {
   const { open: openRegister } = useRegister();
   const [lot, setLot] = useState(initial);
   const [amount, setAmount] = useState(String(initial.minimumNextBid));
+
+  // Server instances can briefly disagree, so never step back to an older view of the lot.
+  const apply = useCallback((next: LotSnapshot) => {
+    setLot((current) => (next.startsAt === current.startsAt && next.bidCount < current.bidCount ? current : next));
+    // Keep the amount field valid when someone else outbids.
+    setAmount((a) => (Number(a) < next.minimumNextBid ? String(next.minimumNextBid) : a));
+  }, []);
+
   const refresh = useCallback(async () => {
     try {
       const res = await fetch(`/api/lots/${initial.id}`, { cache: "no-store" });
-      if (!res.ok) return;
-      const next: LotSnapshot = await res.json();
-      setLot(next);
-      // Keep the amount field valid when someone else outbids.
-      setAmount((a) => (Number(a) < next.minimumNextBid ? String(next.minimumNextBid) : a));
+      if (res.ok) apply(await res.json());
     } catch {
       // Offline or the server restarted; the next poll will catch up.
     }
-  }, [initial.id]);
+  }, [initial.id, apply]);
 
   const [state, action, pending] = useActionState<FormState, FormData>(async (prev, form) => {
     const result = await bidAction(prev, form);
-    // After our own bid lands, pull the new state straight away.
-    if (result.ok) await refresh();
+    if (result.lot) apply(result.lot);
     return result;
   }, {});
 
-  // Poll faster as the close approaches.
+  // Poll while the page is visible, faster as the close approaches.
   useEffect(() => {
     if (lot.status === "ended") return;
-    const left = Date.parse(lot.endsAt) - Date.now();
-    const every = left < 5 * 60_000 ? 2_000 : 5_000;
-    const id = setInterval(refresh, every);
-    return () => clearInterval(id);
+    let timer: ReturnType<typeof setTimeout>;
+    let stopped = false;
+    const schedule = () => {
+      const left = Date.parse(lot.endsAt) - Date.now();
+      timer = setTimeout(async () => {
+        if (document.visibilityState === "visible") await refresh();
+        if (!stopped) schedule();
+      }, left < 5 * 60_000 ? 3_000 : 8_000);
+    };
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void refresh();
+    };
+    schedule();
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, [lot.status, lot.endsAt, refresh]);
 
   const leading = paddle != null && lot.leaderPaddle === paddle;
