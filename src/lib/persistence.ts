@@ -19,7 +19,10 @@ export type Upload = { body: ReadableStream<Uint8Array> | Uint8Array; contentTyp
 export interface Backend {
   /** True when several server instances share this backend, so local caches can go stale. */
   readonly shared: boolean;
-  read(): Promise<Stored | null>;
+  /** The latest stored database, or null if there is none yet. */
+  read(): Promise<Database | null>;
+  /** Like `read`, plus the version tag that `write` needs to detect conflicting writes. */
+  readForUpdate(): Promise<Stored | null>;
   /**
    * Writes the database. `etag` is the version the change was based on (null
    * when creating it). Throws `ConflictError` if someone else wrote first.
@@ -44,16 +47,21 @@ export function fileBackend(dir: string = DATA_DIR): Backend {
   const uploads = path.join(dir, "uploads");
   let warned = false;
 
+  async function readForUpdate(): Promise<Stored | null> {
+    try {
+      const [text, info] = await Promise.all([readFile(dbFile, "utf8"), stat(dbFile)]);
+      return { db: JSON.parse(text) as Database, etag: String(info.mtimeMs) };
+    } catch {
+      return null;
+    }
+  }
+
   return {
     shared: false,
     async read() {
-      try {
-        const [text, info] = await Promise.all([readFile(dbFile, "utf8"), stat(dbFile)]);
-        return { db: JSON.parse(text) as Database, etag: String(info.mtimeMs) };
-      } catch {
-        return null;
-      }
+      return (await readForUpdate())?.db ?? null;
     },
+    readForUpdate,
     async write(db) {
       // A single process serialises its own writes, so there is nothing to conflict with.
       try {
@@ -97,8 +105,29 @@ export function blobBackend(): Backend {
       const { get } = await sdk;
       const result = await get(DB_PATH, { access: "private", useCache: false });
       if (!result || result.statusCode !== 200) return null;
-      const text = await new Response(result.stream).text();
-      return { db: JSON.parse(text) as Database, etag: result.blob.etag };
+      return JSON.parse(await new Response(result.stream).text()) as Database;
+    },
+    async readForUpdate() {
+      // The ETag that `put({ ifMatch })` compares against is the one `head()` reports,
+      // so read the content between two heads and accept it only if nothing changed.
+      const { get, head, BlobNotFoundError } = await sdk;
+      const version = async () => {
+        try {
+          return (await head(DB_PATH)).etag;
+        } catch (error) {
+          if (error instanceof BlobNotFoundError) return null;
+          throw error;
+        }
+      };
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const before = await version();
+        if (before === null) return null;
+        const result = await get(DB_PATH, { access: "private", useCache: false });
+        if (!result || result.statusCode !== 200) return null;
+        const text = await new Response(result.stream).text();
+        if ((await version()) === before) return { db: JSON.parse(text) as Database, etag: before };
+      }
+      throw new ConflictError();
     },
     async write(db, etag) {
       const { put, BlobPreconditionFailedError } = await sdk;

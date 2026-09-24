@@ -14,6 +14,10 @@ function sharedBackend(initial: Database | null = null) {
     shared: true,
     async read() {
       reads++;
+      return doc ? (JSON.parse(doc.json) as Database) : null;
+    },
+    async readForUpdate() {
+      reads++;
       return doc ? { db: JSON.parse(doc.json), etag: doc.etag } : null;
     },
     async write(db, etag) {
@@ -122,6 +126,17 @@ describe("store on a shared backend", () => {
     await store.listLots();
     await store.getLot("celestial-globe-clock");
     expect(shared.stats().reads).toBe(1);
+  });
+
+  it("keeps a bid placed while another instance is reading", async () => {
+    const shared = sharedBackend(buildSeed(NOW));
+    const reader = createStore(shared.backend, { now: clock, ttlMs: 0 });
+    const writer = createStore(shared.backend, { now: clock });
+    const lot = (await writer.listLots()).find((l) => l.id === "leather-butterfly-chair")!;
+    const amount = lot.bids[0].amount + 25;
+    const [, result] = await Promise.all([reader.listLots(), writer.placeBid(lot.id, { paddle: 9001, name: "Ana A" }, amount)]);
+    expect(result.ok).toBe(true);
+    expect((await reader.getLot(lot.id))?.bids[0].amount).toBe(amount);
   });
 
   it("does not write when a change is rejected", async () => {

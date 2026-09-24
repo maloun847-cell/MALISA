@@ -82,6 +82,12 @@ function RegisterForm({ onDone }: { onDone: () => void }) {
         </label>
       </div>
 
+      {state.message && !state.ok && (
+        <p className="mt-4 text-sm text-signal" role="alert">
+          {state.message}
+        </p>
+      )}
+
       <button type="submit" className="btn btn-ink mt-6 w-full" disabled={pending || state.ok}>
         {state.ok ? state.message : pending ? "Issuing paddle…" : "Register to bid"}
       </button>

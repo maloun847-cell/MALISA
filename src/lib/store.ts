@@ -69,15 +69,19 @@ export function createStore(backend: Backend, options: StoreOptions = {}) {
   let reading: Promise<Database> | null = null;
   let queue: Promise<unknown> = Promise.resolve();
 
-  /** Reads the backend, seeding or relisting the catalogue when needed. */
-  async function readThrough(): Promise<{ db: Database; etag: string | null }> {
+  /**
+   * Reads the latest stored version, seeding or relisting the catalogue when
+   * needed. `forUpdate` also returns the version tag a conditional write needs.
+   */
+  async function fetchLatest(forUpdate: boolean): Promise<{ db: Database; etag: string | null }> {
     for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-      const stored = await backend.read();
+      let stored = forUpdate ? await backend.readForUpdate() : await backend.read().then((db) => db && { db, etag: null });
+      if (stored && !refreshed(stored.db, now())) return stored;
+      if (!forUpdate) stored = await backend.readForUpdate();
       const rebuilt = refreshed(stored?.db ?? null, now());
-      if (!rebuilt) return { db: stored!.db, etag: stored!.etag };
+      if (!rebuilt) return stored!;
       try {
-        const etag = await backend.write(rebuilt, stored?.etag ?? null);
-        return { db: rebuilt, etag };
+        return { db: rebuilt, etag: await backend.write(rebuilt, stored?.etag ?? null) };
       } catch (error) {
         if (!(error instanceof ConflictError)) throw error;
       }
@@ -87,7 +91,7 @@ export function createStore(backend: Backend, options: StoreOptions = {}) {
 
   async function load({ fresh = false } = {}): Promise<Database> {
     if (!fresh && cache && now() - cache.at < ttl && !refreshed(cache.db, now())) return cache.db;
-    reading ??= readThrough()
+    reading ??= fetchLatest(false)
       .then(({ db, etag }) => {
         cache = { db, etag, at: now() };
         return db;
@@ -114,8 +118,8 @@ export function createStore(backend: Backend, options: StoreOptions = {}) {
   function mutate<T>(change: (db: Database) => T): Promise<T> {
     const run = queue.then(async () => {
       for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-        if (backend.shared || !cache) await load({ fresh: true });
-        const base = cache!;
+        if (backend.shared || !cache) cache = { ...(await fetchLatest(true)), at: now() };
+        const base = cache;
         const draft = structuredClone(base.db);
         const result = change(draft);
         if (JSON.stringify(draft) === JSON.stringify(base.db)) return result;
@@ -127,6 +131,7 @@ export function createStore(backend: Backend, options: StoreOptions = {}) {
           if (!(error instanceof ConflictError)) throw error;
         }
       }
+      console.warn("[malisa] Gave up after repeated write conflicts.");
       throw new StoreBusyError();
     });
     queue = run.catch(() => undefined);
