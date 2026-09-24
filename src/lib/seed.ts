@@ -2,7 +2,7 @@ import { incrementFor } from "./auction";
 import type { Bid, Bidder, CategorySlug, ConditionNote, Database, Lot } from "./types";
 
 /** Bump when the seed catalogue changes so existing local databases are rebuilt. */
-export const SEED_VERSION = 3;
+export const SEED_VERSION = 4;
 
 const HOUR = 3_600_000;
 
