@@ -1,0 +1,208 @@
+@import "tailwindcss";
+
+/*
+ * Malisa design tokens.
+ * Light, catalogue-like surfaces; warm neutrals; one signal colour for urgency.
+ */
+@theme {
+  --color-paper: #ffffff;
+  --color-paper-2: #f7f5f1;
+  --color-paper-3: #efebe4;
+  --color-line: #e8e3db;
+  --color-line-2: #d8d1c6;
+  --color-ink: #1f1c19;
+  --color-ink-2: #4b4640;
+  --color-ink-3: #7a7269;
+  --color-tone: #978876;
+  --color-tone-light: #ddd2c4;
+  --color-sand: #b3a593;
+  --color-sand-deep: #7f7263;
+  --color-signal: #cf4527;
+  --color-ok: #2e7552;
+
+  --radius-card: 14px;
+  --ease-out-soft: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@theme inline {
+  --font-sans: var(--font-inter-tight), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, SFMono-Regular, monospace;
+  --font-serif: var(--font-instrument-serif), ui-serif, Georgia, serif;
+}
+
+:root {
+  color-scheme: light;
+}
+
+html {
+  scroll-behavior: smooth;
+  scroll-padding-top: 5rem;
+}
+
+body {
+  overflow-x: clip;
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-feature-settings: "ss01", "cv11";
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: var(--color-tone-light);
+  color: var(--color-ink);
+}
+
+@layer components {
+  /* The page frame: vertical hairline rails around the content column. */
+  .frame {
+    @apply relative mx-auto w-full max-w-[1320px] border-x border-line;
+  }
+
+  .gutter {
+    @apply px-5 sm:px-8 lg:px-12;
+  }
+
+  /* Small mono label in a pill, used above headings. */
+  .eyebrow {
+    @apply inline-flex w-fit items-center gap-2 rounded-full border border-line bg-paper-2 px-2.5 py-1 font-mono text-[11px] leading-none tracking-[0.06em] text-ink-3 uppercase;
+  }
+
+  .eyebrow-glass {
+    @apply inline-flex w-fit items-center gap-2 rounded-full border border-white/25 bg-white/10 px-2.5 py-1 font-mono text-[11px] leading-none tracking-[0.06em] text-white/85 uppercase backdrop-blur-md;
+  }
+
+  .label {
+    @apply font-mono text-[11px] leading-4 tracking-[0.06em] text-ink-3 uppercase;
+  }
+
+  .display {
+    @apply font-sans font-light tracking-[-0.035em];
+  }
+
+  /* The second, quieter half of a two-tone heading. */
+  .tone {
+    @apply font-serif font-normal tracking-[-0.01em] text-tone italic;
+  }
+
+  .btn {
+    @apply inline-flex h-11 items-center justify-center gap-2 rounded-full px-5 text-[15px] font-normal tracking-[-0.01em] whitespace-nowrap transition-[background-color,color,border-color,transform] duration-200 select-none active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50;
+  }
+  .btn-ink {
+    @apply bg-ink text-white hover:bg-ink-2;
+  }
+  .btn-white {
+    @apply bg-white text-ink hover:bg-paper-3;
+  }
+  .btn-glass {
+    @apply border border-white/25 bg-white/15 text-white backdrop-blur-md hover:bg-white/25;
+  }
+  .btn-line {
+    @apply border border-line-2 bg-paper text-ink hover:border-ink-3;
+  }
+  .btn-sm {
+    @apply h-9 px-4 text-sm;
+  }
+
+  .field {
+    @apply block w-full rounded-xl border border-line bg-paper px-3.5 py-2.5 text-[15px] text-ink transition-colors outline-none placeholder:text-ink-3/70 focus:border-ink-3 focus:ring-4 focus:ring-paper-3 aria-invalid:border-signal;
+  }
+
+  .card {
+    @apply rounded-[var(--radius-card)] border border-line bg-paper;
+  }
+
+  .glass {
+    @apply rounded-[var(--radius-card)] border border-white/20 bg-white/10 text-white shadow-[0_20px_60px_-30px_rgba(0,0,0,0.5)] backdrop-blur-xl;
+  }
+
+  .link-quiet {
+    @apply text-ink-2 underline decoration-line-2 underline-offset-4 transition-colors hover:text-ink hover:decoration-ink-3;
+  }
+}
+
+/* Hairline "+" registration marks where rails meet a section rule. */
+.reg-mark {
+  position: absolute;
+  top: -6px;
+  width: 11px;
+  height: 11px;
+  pointer-events: none;
+  background:
+    linear-gradient(var(--color-ink-3), var(--color-ink-3)) center / 1px 100% no-repeat,
+    linear-gradient(var(--color-ink-3), var(--color-ink-3)) center / 100% 1px no-repeat;
+  opacity: 0.55;
+}
+.reg-mark[data-side="left"] {
+  left: -6px;
+}
+.reg-mark[data-side="right"] {
+  right: -6px;
+}
+/* Only draw the marks once the frame is narrower than the viewport. */
+@media (max-width: 1343px) {
+  .reg-mark {
+    display: none;
+  }
+}
+
+@keyframes marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+.marquee {
+  animation: marquee 48s linear infinite;
+}
+
+@keyframes pulse-dot {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+.live-dot {
+  animation: pulse-dot 1.6s ease-in-out infinite;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.rise {
+  animation: rise 0.9s var(--ease-out-soft) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .marquee,
+  .live-dot,
+  .rise {
+    animation: none;
+  }
+  html {
+    scroll-behavior: auto;
+  }
+}
+
+/* FAQ disclosure marker */
+details > summary {
+  list-style: none;
+}
+details > summary::-webkit-details-marker {
+  display: none;
+}
+details[open] .faq-icon {
+  transform: rotate(45deg);
+}
