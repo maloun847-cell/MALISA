@@ -44,7 +44,7 @@ def expand_urls(urls: list[str], shorts: bool) -> list[str]:
     return out
 
 
-def download(urls: list[str], raw_dir: str, lang: str, comments: int) -> None:
+def download(urls: list[str], raw_dir: str, lang: str, comments: int, browser: str | None = None) -> None:
     try:
         import yt_dlp  # type: ignore
     except ImportError:
@@ -62,6 +62,9 @@ def download(urls: list[str], raw_dir: str, lang: str, comments: int) -> None:
         "sleep_interval_subtitles": 1,
         "quiet": False,
     }
+    if browser:
+        # Use the browser's YouTube login if YouTube asks "confirm you're not a bot".
+        opts["cookiesfrombrowser"] = (browser,)
     if comments > 0:
         opts["getcomments"] = True
         opts["extractor_args"] = {
@@ -274,6 +277,8 @@ def main() -> None:
     ap.add_argument("--lang", default="en", help="subtitle language code (default: en)")
     ap.add_argument("--comments", type=int, default=0, help="save top N comments per video (default: 0)")
     ap.add_argument("--shorts", action="store_true", help="also fetch the channel's Shorts")
+    ap.add_argument("--cookies-from-browser", metavar="BROWSER",
+                    help="chrome, firefox, edge, safari … — only if YouTube blocks you with a bot check")
     ap.add_argument("--from-dir", help="skip downloading; build from an existing raw directory")
     ap.add_argument("--out", default=DEFAULT_OUT, help="output folder (default: the skill's creator/ folder)")
     args = ap.parse_args()
@@ -283,7 +288,7 @@ def main() -> None:
     if not args.from_dir:
         if not args.urls:
             ap.error("give at least one URL, or --from-dir")
-        download(expand_urls(args.urls, args.shorts), raw_dir, args.lang, args.comments)
+        download(expand_urls(args.urls, args.shorts), raw_dir, args.lang, args.comments, args.cookies_from_browser)
     build(raw_dir, args.out, args.lang)
 
 

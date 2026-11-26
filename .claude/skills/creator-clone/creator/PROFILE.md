@@ -1,7 +1,7 @@
 ---
 status: empty            # empty → learned
-creator: ""              # channel name
-channel_url: ""
+creator: "Dr. Plants"              # channel name
+channel_url: "https://www.youtube.com/@DrPlants"
 videos_analysed: 0
 date_range: ""
 last_updated: ""

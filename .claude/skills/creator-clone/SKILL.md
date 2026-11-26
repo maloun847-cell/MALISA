@@ -91,6 +91,8 @@ python .claude/skills/creator-clone/scripts/fetch_creator.py "https://www.youtub
 - `--lang` is the subtitle language code (e.g. `en`, `de`, `bs`, `hr`, `sr`); auto-generated subtitles are used when the creator didn't upload their own.
 - `--comments N` saves the top N comments per video (what the audience reacted to). Optional; slower.
 - `--shorts` also includes the channel's Shorts.
+- `--cookies-from-browser chrome` (or `firefox`, `edge`, `safari`) uses your browser's YouTube login if YouTube answers "Sign in to confirm you're not a bot". Cloud servers almost always get this block; home internet usually doesn't.
+- If yt-dlp warns about a missing JavaScript runtime and videos fail, install Deno (https://deno.com) and run `pip install -U "yt-dlp[default]"`.
 - `--from-dir DIR` rebuilds transcripts from already-downloaded `.vtt` + `.info.json` files without going online.
 
 Then commit `creator/transcripts/` and `creator/catalogue.md` (raw downloads in `creator/raw/` are git-ignored) and ask Claude to "learn the creator".
